@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from src.config import BENCH_CSV, DEFAULT_HOURLY_USD, LOAD_CSV, REPORT_MD
+from src.config import BENCH_CSV, DEFAULT_HOURLY_USD, DEFAULT_SLA_MS, LOAD_CSV, REPORT_MD
 from src.cost import (break_even_requests_per_day, instances_needed, monthly_api_cost, monthly_self_host_cost)
 from src.report import (MAX_PPL_INCREASE_PCT, add_cost_columns, capacity_from_loadtest, load_workload, model_of,
                         pick_baseline, pick_optimized, ppl_change_text, rejected_engines, same_model)
@@ -19,7 +19,7 @@ if not BENCH_CSV.exists():
 with st.sidebar:
     st.header("Assumptions")
     hourly = st.number_input("Instance price (USD/hour)", value=float(DEFAULT_HOURLY_USD), step=0.005, format="%.3f")
-    sla_ms = st.number_input("p95 latency SLA (ms)", value=3000.0, step=100.0)
+    sla_ms = st.number_input("p95 latency SLA (ms)", value=float(DEFAULT_SLA_MS), step=100.0)
     headroom = st.slider("Max load per instance", 0.3, 0.95, 0.8)
 
 bench = add_cost_columns(pd.read_csv(BENCH_CSV), hourly)

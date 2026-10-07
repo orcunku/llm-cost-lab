@@ -4,7 +4,7 @@ import math
 
 import pandas as pd
 
-from .config import BENCH_CSV, DEFAULT_HOURLY_USD, LOAD_CSV, REPORT_MD
+from .config import BENCH_CSV, DEFAULT_HOURLY_USD, DEFAULT_SLA_MS, LOAD_CSV, REPORT_MD
 from .cost import cost_per_million_tokens, instances_needed, monthly_self_host_cost, request_cost
 
 MAX_PPL_INCREASE_PCT = 5.0   # quality gate: an engine may not raise perplexity by more than this vs the baseline
@@ -92,7 +92,7 @@ def _md_table(df, cols):
     return "\n".join(lines)
 
 
-def build_report(bench, load, hourly_usd, sla_ms=3000, target_rps=5.0, headroom=0.8):
+def build_report(bench, load, hourly_usd, sla_ms=DEFAULT_SLA_MS, target_rps=5.0, headroom=0.8):
     bench = add_cost_columns(bench, hourly_usd)
     base_name, opt_name = pick_baseline(bench), pick_optimized(bench)
     rejected = rejected_engines(bench)
@@ -198,7 +198,7 @@ def build_report(bench, load, hourly_usd, sla_ms=3000, target_rps=5.0, headroom=
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--hourly-usd", type=float, default=DEFAULT_HOURLY_USD)
-    ap.add_argument("--sla-ms", type=float, default=3000)
+    ap.add_argument("--sla-ms", type=float, default=DEFAULT_SLA_MS)
     ap.add_argument("--target-rps", type=float, default=5.0)
     ap.add_argument("--print-choice", action="store_true", help="print the recommended engine name and exit")
     args = ap.parse_args()
