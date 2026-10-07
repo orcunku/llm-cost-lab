@@ -3,10 +3,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from src.config import BENCH_CSV, DEFAULT_HOURLY_USD, LOAD_CSV, REPORT_MD
+from src.config import BENCH_CSV, DEFAULT_HOURLY_USD, DEFAULT_SLA_MS, LOAD_CSV, REPORT_MD
 from src.cost import (break_even_requests_per_day, instances_needed, monthly_api_cost, monthly_self_host_cost)
-from src.report import (MAX_PPL_INCREASE_PCT, add_cost_columns, capacity_from_loadtest, pick_baseline,
-                        pick_optimized, rejected_engines)
+from src.report import (MAX_PPL_INCREASE_PCT, add_cost_columns, capacity_from_loadtest, load_workload, model_of,
+                        pick_baseline, pick_optimized, ppl_change_text, rejected_engines, same_model)
 
 st.set_page_config(page_title="LLM Inference Cost Lab", layout="wide")
 st.title("LLM Inference Cost Lab")
@@ -19,15 +19,20 @@ if not BENCH_CSV.exists():
 with st.sidebar:
     st.header("Assumptions")
     hourly = st.number_input("Instance price (USD/hour)", value=float(DEFAULT_HOURLY_USD), step=0.005, format="%.3f")
-    sla_ms = st.number_input("p95 latency SLA (ms)", value=3000.0, step=100.0)
+    sla_ms = st.number_input("p95 latency SLA (ms)", value=float(DEFAULT_SLA_MS), step=100.0)
     headroom = st.slider("Max load per instance", 0.3, 0.95, 0.8)
 
 bench = add_cost_columns(pd.read_csv(BENCH_CSV), hourly)
 load = pd.read_csv(LOAD_CSV) if LOAD_CSV.exists() else None
 engines = bench.engine.unique().tolist()
+st.caption(f"Model: `{model_of(bench)}`")
+if load is not None and not same_model(bench, load):
+    st.warning(f"The load test ran on `{model_of(load)}`, not on the benchmarked model `{model_of(bench)}`. "
+               "It is ignored; re-run `python -m src.loadtest`.")
+    load = None
 
 for name, pct in rejected_engines(bench):
-    st.warning(f"Quality gate: **{name}** raises perplexity by {pct:+.0f}% vs {pick_baseline(bench)} "
+    st.warning(f"Quality gate: **{name}**: perplexity {ppl_change_text(pct)} vs {pick_baseline(bench)} "
                f"(limit {MAX_PPL_INCREASE_PCT:g}%). It is excluded from the recommendation even if it is cheaper.")
 
 t1, t2, t3, t4 = st.tabs(["Engines", "Load test", "Capacity & cost planner", "Report"])
@@ -84,6 +89,12 @@ with t3:
     cap = capacity_from_loadtest(load[load.engine == eng], sla_ms) if load is not None and eng in set(load.engine) else None
     if cap:
         inst_rps, src = cap["rps"], f"measured load test (p95 {cap['p95_ms']:.0f} ms within SLA)"
+        workload = load_workload(load[load.engine == eng])
+        if workload and workload != (int(in_tok), int(out_tok)):
+            st.warning(f"Capacity was measured with {workload[0]} prompt / {workload[1]} generated tokens per request, "
+                       f"not the {in_tok:.0f} / {out_tok:.0f} entered here, so the instance count is approximate. "
+                       f"Re-run `python -m src.loadtest --prompt-tokens {in_tok:.0f} --max-new-tokens {out_tok:.0f}` "
+                       "for an exact figure.")
     else:
         inst_rps, src = 1000.0 / row.e2e_p50_ms, "single-request service time (no load test for this engine)"
         if row.e2e_p95_ms > sla_ms:

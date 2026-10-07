@@ -85,3 +85,42 @@ def test_baseline_kept_when_nothing_passes():
     df = df[df.engine != "onnx_fp32"]
     assert pick_optimized(df) == "pytorch"
     assert "No optimized engine passed" in build_report(df, None, hourly_usd=0.085)
+
+
+def test_report_names_the_model():
+    bench = bench_df().assign(model="org/model-a")
+    assert "Model: **`org/model-a`**" in build_report(bench, None, hourly_usd=0.085)
+    assert "Model: **`unknown`**" in build_report(bench_df(), None, hourly_usd=0.085)   # CSV from before the column
+
+
+def test_load_test_from_another_model_is_not_used_for_capacity():
+    bench, load = bench_df().assign(model="org/model-a"), load_df().assign(model="org/model-b")
+    text = build_report(bench, load, hourly_usd=0.085, sla_ms=3000, target_rps=5)
+    assert "org/model-b" in text and "left out" in text
+    assert "instance(s)" not in text
+    same = build_report(bench, load.assign(model="org/model-a"), hourly_usd=0.085, sla_ms=3000, target_rps=5)
+    assert "instance(s)" in same
+
+
+def test_unmeasurable_perplexity_fails_the_quality_gate():
+    from src.report import pick_optimized, rejected_engines
+    df = bench_df()
+    df.loc[df.engine == "onnx_int8", "perplexity"] = float("nan")
+    assert [e for e, _ in rejected_engines(df)] == ["onnx_int8"]
+    assert pick_optimized(df) == "pytorch"
+    text = build_report(df, None, hourly_usd=0.085)
+    assert "could not be measured" in text and "nan%" not in text
+
+
+def test_report_warns_when_baseline_perplexity_is_missing():
+    df = bench_df()
+    df.loc[df.engine == "pytorch", "perplexity"] = float("nan")
+    assert "perplexity of `pytorch` could not be measured" in build_report(df, None, hourly_usd=0.085)
+
+
+def test_report_flags_load_test_with_other_request_size():
+    load = load_df().assign(prompt_tokens=64, new_tokens=32)
+    same = build_report(bench_df(), load, hourly_usd=0.085, sla_ms=3000, target_rps=5)
+    assert "64 prompt tokens, 32 generated tokens" in same and "different request size" not in same
+    other = build_report(bench_df(), load.assign(new_tokens=16), hourly_usd=0.085, sla_ms=3000, target_rps=5)
+    assert "different request size" in other

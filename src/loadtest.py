@@ -8,14 +8,8 @@ import time
 import httpx
 import pandas as pd
 
-from .config import LOAD_CSV, RESULTS_DIR, ROOT
-from .data import load_eval_texts
+from .config import LOAD_CSV, LOAD_PROMPT_TOKENS, NEW_TOKENS, RESULTS_DIR, ROOT
 from .stats import summarize
-
-
-def build_prompt(prompt_tokens):
-    words = " ".join(load_eval_texts()).split()
-    return " ".join(words[:max(1, int(prompt_tokens * 0.75))])
 
 
 async def run_level(client, concurrency, duration_s, prompt, max_new_tokens):
@@ -80,8 +74,8 @@ def main():
     ap.add_argument("--engine", default="onnx_int8")
     ap.add_argument("--levels", type=int, nargs="+", default=[1, 2, 4, 8])
     ap.add_argument("--duration", type=float, default=40)
-    ap.add_argument("--max-new-tokens", type=int, default=16)
-    ap.add_argument("--prompt-tokens", type=int, default=128)
+    ap.add_argument("--max-new-tokens", type=int, default=NEW_TOKENS)
+    ap.add_argument("--prompt-tokens", type=int, default=LOAD_PROMPT_TOKENS)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--url", default=None, help="use an already running server instead of starting one")
     ap.add_argument("--out", default=str(LOAD_CSV))
@@ -94,15 +88,20 @@ def main():
                                  "--port", str(args.port)], cwd=ROOT)
     try:
         wait_for_server(url, proc)
-        print(f"Load testing engine={args.engine}")
-        rows = asyncio.run(run_all(url, args.levels, args.duration, build_prompt(args.prompt_tokens),
-                                   args.max_new_tokens))
+        model = httpx.get(url + "/health", timeout=10).json().get("model", "unknown")
+        p = httpx.get(url + "/prompt", params={"tokens": args.prompt_tokens}, timeout=60).json()
+        print(f"Load testing engine={args.engine} model={model} "
+              f"prompt_tokens={p['prompt_tokens']} new_tokens={args.max_new_tokens}")
+        rows = asyncio.run(run_all(url, args.levels, args.duration, p["prompt"], args.max_new_tokens))
     finally:
         if proc is not None:
             proc.terminate()
     RESULTS_DIR.mkdir(exist_ok=True)
     df = pd.DataFrame(rows)
     df.insert(0, "engine", args.engine)
+    df.insert(1, "model", model)
+    df.insert(2, "prompt_tokens", p["prompt_tokens"])
+    df.insert(3, "new_tokens", args.max_new_tokens)
     df.round(3).to_csv(args.out, index=False)
     print(f"Saved {args.out}")
 

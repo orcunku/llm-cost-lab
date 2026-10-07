@@ -28,11 +28,13 @@ Each step can be run alone:
 ```bash
 python -m src.export
 python -m src.benchmark --runs 10 --prompt-lens 64 256 --new-tokens 32
-python -m src.loadtest --engine onnx_int8 --levels 1 2 4 8 --duration 40
-python -m src.report --hourly-usd 0.085 --sla-ms 3000 --target-rps 5
+python -m src.loadtest --engine onnx_fp32 --levels 1 2 4 8 --duration 40
+python -m src.report --hourly-usd 0.085 --sla-ms 4000 --target-rps 5
 pytest -q            # works without torch: tests use a simulated engine
 ```
-Faster first try: `export LAB_MODEL=HuggingFaceTB/SmolLM2-135M-Instruct` before step 1.
+Faster first try: `export LAB_MODEL=HuggingFaceTB/SmolLM2-135M-Instruct` before step 1 (set it in the same terminal).
+Each model gets its own export folder under `models/`, and every result row records the model it measured.
+Re-running only some engines keeps earlier results as long as model and settings match.
 
 ## Metrics
 | Metric | Why it matters |
@@ -46,15 +48,47 @@ Faster first try: `export LAB_MODEL=HuggingFaceTB/SmolLM2-135M-Instruct` before 
 | Instances + monthly cost, API break-even | the decision a manager actually needs |
 
 ## Results
-_Fill in after your run (copy the headline from `results/REPORT.md`):_
+SmolLM2-135M-Instruct on a 2-vCPU Codespace, 256 prompt tokens + 32 generated tokens per request
+(full report: [`results/smollm2-135m/REPORT.md`](results/smollm2-135m/REPORT.md)).
 
-| Engine | TTFT p50 | Decode tok/s | $/1M output tok | Perplexity | Memory |
-|---|---|---|---|---|---|
-| pytorch | | | | | |
-| onnx_fp32 | | | | | |
-| onnx_int8 | | | | | |
+| Engine | TTFT p50 | Decode tok/s | $/1M output tok | Perplexity | Memory (RSS) | Quality gate |
+|---|---|---|---|---|---|---|
+| pytorch (baseline) | 565 ms | 14.9 | $1.59 | 33.49 | 858 MB | baseline |
+| **onnx_fp32** | 662 ms | **17.3** | **$1.37** | 33.49 (+0%) | 1362 MB | pass |
+| onnx_int8 | 334 ms | 36.1 | $0.65 | 55.66 (+66%) | 700 MB | **fail** |
+| onnx_int8_pc | 396 ms | 27.1 | $0.87 | 52.90 (+58%) | 785 MB | **fail** |
 
-**Recommendation:** _one paragraph, e.g. "Deploy INT8 at concurrency N: X req/s per instance within a Y ms p95 SLA, Z instances for 5 req/s, $W/month."_
+**Recommendation:** deploy ONNX Runtime FP32. It decodes 1.16x faster and costs 14% less per output token than
+PyTorch with identical quality (same perplexity, 100% identical greedy output). One 2-vCPU instance serves
+0.38 req/s within a 4 s p95 SLA, so 5 req/s needs 17 instances, about $1,055/month at $0.085/hour.
+INT8 is 2.4x faster but fails the quality gate on this 135M model, so it is not recommended.
+
+**What the numbers show**
+- **The faster engine depends on prompt length.** ONNX FP32 reaches the first token 24% sooner than PyTorch at
+  64 prompt tokens but 17% later at 256; decoding is 16-21% faster at both. For long prompts (RAG) check TTFT,
+  not just tokens/s.
+- **Cheaper is not better if quality drops.** Both INT8 variants agree with the baseline on only 7% of greedy
+  tokens. Keeping `lm_head` in FP32 (`int8_pc`) barely helps, which suggests the exclusion is not taking effect
+  for this tied-embedding model; this is still open.
+- **Concurrency buys nothing without batching.** Throughput stays at ~0.38 req/s from 1 to 8 concurrent users
+  while p95 grows from 3.1 s to 20 s: the single worker is saturated and extra requests only queue.
+- **The SLA is an assumption sized to the workload.** 4 s p95 end-to-end for a non-streamed 256+32-token
+  request; a single request alone already takes 2.6 s (p50) on this CPU. Change it with `--sla-ms`.
+
+## Correctness fixes
+Problems found in an audit of the pipeline, each fixed with a regression test:
+- **Wrong model measured.** Changing `LAB_MODEL` silently reused the previous model's ONNX export with the new
+  tokenizer. Exports now live in one folder per model and every CSV and report records the model.
+- **Impossible speeds.** `--new-tokens 1` or timing noise was clamped to 1e-6 ms, reporting ~264,000 tokens/s
+  and $0 cost. Decode time is now unclamped and a run fails loudly when it cannot be measured.
+- **Two different baselines.** Greedy agreement was measured against the first engine listed, perplexity against
+  PyTorch. One shared rule now decides the baseline, and agreement is recomputed against it on every run.
+- **Partial re-runs.** Re-running one engine overwrote all other results and compared the engine with itself.
+  Earlier results are now kept, but only when model, prompt lengths, output tokens, threads and runs match.
+- **Unmeasurable quality passed the gate.** A NaN perplexity compared as "not worse than 5%". It now fails.
+- **Benchmark and load test measured different requests** (~128 words / 16 tokens vs 256 / 32 tokens), so cost
+  and capacity described different workloads. Both now share one workload and the benchmark's exact prompt;
+  capacity per instance went from 0.83 to 0.38 req/s once requests matched.
 
 ## Limitations (keep these in your write-up)
 - Small model, shared CPU, one instance type: trust ratios more than absolute numbers.
