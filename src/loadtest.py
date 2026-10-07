@@ -94,7 +94,8 @@ def main():
                                  "--port", str(args.port)], cwd=ROOT)
     try:
         wait_for_server(url, proc)
-        print(f"Load testing engine={args.engine}")
+        model = httpx.get(url + "/health", timeout=10).json().get("model", "unknown")
+        print(f"Load testing engine={args.engine} model={model}")
         rows = asyncio.run(run_all(url, args.levels, args.duration, build_prompt(args.prompt_tokens),
                                    args.max_new_tokens))
     finally:
@@ -103,6 +104,7 @@ def main():
     RESULTS_DIR.mkdir(exist_ok=True)
     df = pd.DataFrame(rows)
     df.insert(0, "engine", args.engine)
+    df.insert(1, "model", model)
     df.round(3).to_csv(args.out, index=False)
     print(f"Saved {args.out}")
 

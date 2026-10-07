@@ -4,7 +4,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL_ID = os.environ.get("LAB_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
-MODELS_DIR = ROOT / "models"
+# One folder per model, so changing LAB_MODEL never reuses another model's ONNX export.
+MODELS_DIR = ROOT / "models" / MODEL_ID.replace("/", "--")
 FP32_DIR = MODELS_DIR / "fp32"
 INT8_DIR = MODELS_DIR / "int8"
 INT8_PC_DIR = MODELS_DIR / "int8_pc"   # per-channel INT8, output layer kept in FP32

@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
+from .config import MODEL_ID
+
 
 class GenRequest(BaseModel):
     prompt: str
@@ -20,7 +22,7 @@ def create_app(engine):
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "engine": engine.name}
+        return {"status": "ok", "engine": engine.name, "model": MODEL_ID}
 
     @app.post("/generate")
     async def generate(req: GenRequest):

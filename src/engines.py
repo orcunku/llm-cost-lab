@@ -92,6 +92,8 @@ class OrtEngine(HFEngine):
         import onnxruntime as ort
         from optimum.onnxruntime import ORTModelForCausalLM
         from .export import primary_files, size_mb
+        if not primary_files(directory):
+            raise FileNotFoundError(f"no ONNX model for {MODEL_ID} in {directory}; run `python -m src.export` first")
         self.name = name
         self._init_tokenizer()
         so = ort.SessionOptions()

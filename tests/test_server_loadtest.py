@@ -11,6 +11,7 @@ from src.server import create_app
 def test_health_and_generate():
     client = TestClient(create_app(DummyEngine()))
     assert client.get("/health").json()["status"] == "ok"
+    assert client.get("/health").json()["model"]
     r = client.post("/generate", json={"prompt": "hello world", "max_new_tokens": 5}).json()
     assert r["new_tokens"] == 5 and r["compute_ms"] > 0 and r["queue_ms"] >= 0
 

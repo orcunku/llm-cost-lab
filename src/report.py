@@ -1,5 +1,6 @@
 """Cost columns + auto-generated markdown report with a quality-gated recommendation."""
 import argparse
+import math
 
 import pandas as pd
 
@@ -18,8 +19,27 @@ def add_cost_columns(df, hourly_usd):
     return df
 
 
+def model_of(df):
+    """Model the results came from; 'unknown' for CSVs written before the model column existed."""
+    if df is None or "model" not in df.columns or df.model.isna().all():
+        return "unknown"
+    return ", ".join(sorted(df.model.dropna().astype(str).unique()))
+
+
+def same_model(bench, load):
+    """False only when both CSVs name their model and the models differ."""
+    a, b = model_of(bench), model_of(load)
+    return "unknown" in (a, b) or a == b
+
+
+def baseline_engine(engines):
+    """The reference every engine is compared against (perplexity and greedy output): PyTorch when measured."""
+    engines = list(engines)
+    return "pytorch" if "pytorch" in engines else engines[0]
+
+
 def pick_baseline(df):
-    return "pytorch" if "pytorch" in set(df.engine) else df.engine.iloc[0]
+    return baseline_engine(df.engine.unique())
 
 
 def _per_engine(df):
@@ -32,10 +52,15 @@ def ppl_increase_pct(df, engine):
 
 
 def rejected_engines(df, max_pct=MAX_PPL_INCREASE_PCT):
-    """Engines that fail the quality gate, as (engine, perplexity increase in %)."""
+    """Engines that fail the quality gate, as (engine, perplexity increase in %).
+    An increase that could not be measured (NaN) fails too: quality has to be shown, not assumed."""
     base = pick_baseline(df)
     return [(e, ppl_increase_pct(df, e)) for e in _per_engine(df).index
-            if e != base and ppl_increase_pct(df, e) > max_pct]
+            if e != base and not ppl_increase_pct(df, e) <= max_pct]
+
+
+def ppl_change_text(pct):
+    return f"rises {pct:+.0f}%" if math.isfinite(pct) else "could not be measured"
 
 
 def pick_optimized(df, max_pct=MAX_PPL_INCREASE_PCT):
@@ -72,10 +97,15 @@ def build_report(bench, load, hourly_usd, sla_ms=3000, target_rps=5.0, headroom=
 
     b, o = at(base_name), at(opt_name)
     out = ["# LLM Inference Cost Report", "",
+           f"Model: **`{model_of(bench)}`**.", "",
            f"Assumed instance price: **${hourly_usd:.3f}/hour** (edit with `--hourly-usd`). "
            f"Headline comparison at **{int(plen)} prompt tokens**, {int(b.new_tokens)} generated tokens.", "",
            f"**Quality gate:** an engine is only recommended if its perplexity rises by at most "
-           f"{MAX_PPL_INCREASE_PCT:g}% versus `{base_name}`.", "", "## Headline", ""]
+           f"{MAX_PPL_INCREASE_PCT:g}% versus `{base_name}`.", ""]
+    if not math.isfinite(b.perplexity):
+        out += [f"> **Warning:** the perplexity of `{base_name}` could not be measured, so no other engine can pass "
+                f"the quality gate. Check the baseline run.", ""]
+    out += ["## Headline", ""]
 
     if opt_name == base_name:
         out.append(f"- No optimized engine passed the quality gate, so `{base_name}` stays the recommendation.")
@@ -98,17 +128,24 @@ def build_report(bench, load, hourly_usd, sla_ms=3000, target_rps=5.0, headroom=
         out += ["## Engines rejected by the quality gate", ""]
         for name, pct in rejected:
             r = at(name)
+            match = f"{r.greedy_match * 100:.0f}%" if math.isfinite(r.greedy_match) else "an unknown share"
+            verdict = ("Cheaper is not better when quality drops this much." if math.isfinite(pct)
+                       else "Its quality is unproven, so it is not recommended.")
             out.append(f"- `{name}` is {r.decode_tps / b.decode_tps:.2f}x faster and "
                        f"{(1 - r.cost_per_1m_output_tokens_usd / b.cost_per_1m_output_tokens_usd) * 100:.0f}% cheaper, "
-                       f"but perplexity rises {pct:+.0f}% and only {r.greedy_match * 100:.0f}% of generated tokens "
-                       f"match the baseline. **Cheaper is not better when quality drops this much.**")
+                       f"but perplexity {ppl_change_text(pct)} and only {match} of generated tokens "
+                       f"match the baseline. **{verdict}**")
         out.append("")
 
     out += ["## All engines", "",
             _md_table(bench.round(3), ["engine", "prompt_tokens", "ttft_p50_ms", "ttft_p95_ms", "tpot_p50_ms",
                                        "decode_tps", "cost_per_1m_output_tokens_usd", "perplexity", "greedy_match"]), ""]
 
-    if load is not None and not load.empty:
+    if load is not None and not load.empty and not same_model(bench, load):
+        out += ["## Capacity", "",
+                f"> The load test ran on `{model_of(load)}`, not on the benchmarked model `{model_of(bench)}`, "
+                f"so its capacity numbers are left out. Re-run `python -m src.loadtest --engine {opt_name}`.", ""]
+    elif load is not None and not load.empty:
         eng = opt_name if opt_name in set(load.engine) else load.engine.iloc[0]
         cap = capacity_from_loadtest(load[load.engine == eng], sla_ms)
         out += ["## Capacity (measured with a real HTTP load test)", "",
