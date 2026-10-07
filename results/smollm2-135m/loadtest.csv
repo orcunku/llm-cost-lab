@@ -1,5 +1,5 @@
 engine,model,prompt_tokens,new_tokens,concurrency,requests,errors,rps,tokens_per_sec,p50_ms,p95_ms,p99_ms,mean_queue_ms,mean_compute_ms
-onnx_fp32,HuggingFaceTB/SmolLM2-135M-Instruct,256,32,1,15,0,0.375,11.99,2596.994,3100.87,3122.884,0.134,2663.859
-onnx_fp32,HuggingFaceTB/SmolLM2-135M-Instruct,256,32,2,16,0,0.369,11.794,5369.934,5921.519,5964.975,2550.041,2712.071
-onnx_fp32,HuggingFaceTB/SmolLM2-135M-Instruct,256,32,4,19,0,0.383,12.254,10324.382,10964.501,11108.984,7017.285,2610.407
-onnx_fp32,HuggingFaceTB/SmolLM2-135M-Instruct,256,32,8,23,0,0.395,12.65,19869.588,20256.304,20556.432,14587.355,2528.707
+onnx_int8_mixed,HuggingFaceTB/SmolLM2-135M-Instruct,256,32,1,23,0,0.569,18.207,1736.448,1920.576,1953.53,0.158,1754.194
+onnx_int8_mixed,HuggingFaceTB/SmolLM2-135M-Instruct,256,32,2,25,0,0.575,18.416,3469.0,3606.099,3616.753,1667.152,1736.428
+onnx_int8_mixed,HuggingFaceTB/SmolLM2-135M-Instruct,256,32,4,27,0,0.578,18.507,6907.838,7029.992,7111.012,4802.567,1728.067
+onnx_int8_mixed,HuggingFaceTB/SmolLM2-135M-Instruct,256,32,8,30,0,0.557,17.831,14188.651,15075.625,15171.587,10899.04,1793.498

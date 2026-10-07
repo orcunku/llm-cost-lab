@@ -28,7 +28,7 @@ Each step can be run alone:
 ```bash
 python -m src.export
 python -m src.benchmark --runs 10 --prompt-lens 64 256 --new-tokens 32
-python -m src.loadtest --engine onnx_fp32 --levels 1 2 4 8 --duration 40
+python -m src.loadtest --engine onnx_int8_mixed --levels 1 2 4 8 --duration 40
 python -m src.report --hourly-usd 0.085 --sla-ms 4000 --target-rps 5
 pytest -q            # works without torch: tests use a simulated engine
 ```
@@ -53,27 +53,33 @@ SmolLM2-135M-Instruct on a 2-vCPU Codespace, 256 prompt tokens + 32 generated to
 
 | Engine | TTFT p50 | Decode tok/s | $/1M output tok | Perplexity | Memory (RSS) | Quality gate |
 |---|---|---|---|---|---|---|
-| pytorch (baseline) | 565 ms | 14.9 | $1.59 | 33.49 | 858 MB | baseline |
-| **onnx_fp32** | 662 ms | **17.3** | **$1.37** | 33.49 (+0%) | 1362 MB | pass |
-| onnx_int8 | 334 ms | 36.1 | $0.65 | 55.66 (+66%) | 700 MB | **fail** |
-| onnx_int8_pc | 396 ms | 27.1 | $0.87 | 52.90 (+58%) | 785 MB | **fail** |
+| pytorch (baseline) | 521 ms | 15.0 | $1.57 | 33.49 | 857 MB | baseline |
+| onnx_fp32 | 631 ms | 17.5 | $1.35 | 33.49 (+0%) | 1358 MB | pass |
+| onnx_int8 | 300 ms | 36.6 | $0.64 | 55.66 (+66%) | 700 MB | **fail** |
+| onnx_int8_pc | 393 ms | 29.0 | $0.81 | 52.90 (+58%) | 775 MB | **fail** |
+| **onnx_int8_mixed** | 462 ms | **24.1** | **$0.98** | 34.31 (+2.4%) | 946 MB | pass |
 
-**Recommendation:** deploy ONNX Runtime FP32. It decodes 1.16x faster and costs 14% less per output token than
-PyTorch with identical quality (same perplexity, 100% identical greedy output). One 2-vCPU instance serves
-0.38 req/s within a 4 s p95 SLA, so 5 req/s needs 17 instances, about $1,055/month at $0.085/hour.
-INT8 is 2.4x faster but fails the quality gate on this 135M model, so it is not recommended.
+**Recommendation:** deploy `onnx_int8_mixed`: INT8 everywhere except the MLP `down_proj` layers, the output
+layer and the embedding table. It decodes 1.61x faster and costs 38% less per output token than PyTorch, with
++2.4% perplexity (gate: 5%). One 2-vCPU instance serves 0.57 req/s within a 4 s p95 SLA, so 5 req/s needs
+11 instances, about $683/month at $0.085/hour (17 instances and ~$1,055 with ONNX FP32).
 
 **What the numbers show**
-- **The faster engine depends on prompt length.** ONNX FP32 reaches the first token 24% sooner than PyTorch at
-  64 prompt tokens but 17% later at 256; decoding is 16-21% faster at both. For long prompts (RAG) check TTFT,
+- **Where INT8 breaks matters more than whether to use it.** Plain INT8 is 2.4x faster but raises perplexity
+  by 66%. Quantizing one layer group at a time showed that almost all of the damage comes from the 30 MLP
+  `down_proj` layers (+40% perplexity on their own); attention (+0.1%), MLP gate/up (+1.2%) and the embedding
+  table (+0.6%) are nearly harmless. Keeping only `down_proj` in FP32 recovers quality and keeps most of the
+  speed-up. These layers receive large activation outliers, which dynamic INT8 squeezes into one scale per tensor.
+- **Perplexity is not the whole story.** `int8_mixed` passes the perplexity gate but produces the same greedy
+  tokens as PyTorch only 38% of the time, because one early different token changes everything after it.
+  Check task-level quality before shipping; the gate here is a minimum bar.
+- **The faster engine depends on prompt length.** ONNX FP32 reaches the first token 18% sooner than PyTorch at
+  64 prompt tokens but 21% later at 256; decoding is 16-24% faster at both. For long prompts (RAG) check TTFT,
   not just tokens/s.
-- **Cheaper is not better if quality drops.** Both INT8 variants agree with the baseline on only 7% of greedy
-  tokens. Keeping `lm_head` in FP32 (`int8_pc`) barely helps, which suggests the exclusion is not taking effect
-  for this tied-embedding model; this is still open.
-- **Concurrency buys nothing without batching.** Throughput stays at ~0.38 req/s from 1 to 8 concurrent users
-  while p95 grows from 3.1 s to 20 s: the single worker is saturated and extra requests only queue.
+- **Concurrency buys nothing without batching.** Throughput stays at ~0.57 req/s from 1 to 8 concurrent users
+  while p95 grows from 1.9 s to 15 s: the single worker is saturated and extra requests only queue.
 - **The SLA is an assumption sized to the workload.** 4 s p95 end-to-end for a non-streamed 256+32-token
-  request; a single request alone already takes 2.6 s (p50) on this CPU. Change it with `--sla-ms`.
+  request (a single request alone takes 2.6 s p50 with ONNX FP32 on this CPU). Change it with `--sla-ms`.
 
 ## Correctness fixes
 Problems found in an audit of the pipeline, each fixed with a regression test:

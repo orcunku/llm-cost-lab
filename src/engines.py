@@ -2,7 +2,7 @@
 import math
 import time
 
-from .config import FP32_DIR, INT8_DIR, INT8_PC_DIR, MODEL_ID
+from .config import FP32_DIR, INT8_DIR, INT8_MIXED_DIR, INT8_PC_DIR, MODEL_ID
 from .data import load_eval_texts
 
 
@@ -116,4 +116,6 @@ def build_engine(name, threads=2):
         return OrtEngine("onnx_int8", INT8_DIR, threads)
     if name == "onnx_int8_pc":
         return OrtEngine("onnx_int8_pc", INT8_PC_DIR, threads)
+    if name == "onnx_int8_mixed":
+        return OrtEngine("onnx_int8_mixed", INT8_MIXED_DIR, threads)
     raise ValueError(f"unknown engine: {name}")
