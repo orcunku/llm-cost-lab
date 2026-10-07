@@ -1,0 +1,12 @@
+# torch (CPU build) is installed in setup.sh
+transformers>=4.45,<4.54
+optimum[onnxruntime]>=1.23,<1.28
+onnx
+numpy
+pandas
+psutil
+fastapi
+uvicorn
+httpx
+streamlit>=1.35
+pytest

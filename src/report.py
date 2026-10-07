@@ -1,0 +1,116 @@
+"""Cost columns + auto-generated markdown report with the headline numbers and a recommendation."""
+import argparse
+
+import pandas as pd
+
+from .config import BENCH_CSV, DEFAULT_HOURLY_USD, LOAD_CSV, REPORT_MD
+from .cost import cost_per_million_tokens, instances_needed, monthly_self_host_cost, request_cost
+
+
+def add_cost_columns(df, hourly_usd):
+    df = df.copy()
+    df["cost_per_1m_output_tokens_usd"] = df["decode_tps"].apply(lambda t: cost_per_million_tokens(t, hourly_usd))
+    df["cost_per_1m_input_tokens_usd"] = df["prefill_tps"].apply(lambda t: cost_per_million_tokens(t, hourly_usd))
+    df["cost_per_1k_requests_usd"] = df["e2e_p50_ms"].apply(lambda ms: request_cost(ms / 1000, hourly_usd) * 1000)
+    df["hourly_usd"] = hourly_usd
+    return df
+
+
+def pick_baseline(df):
+    return "pytorch" if "pytorch" in set(df.engine) else df.engine.iloc[0]
+
+
+def pick_optimized(df):
+    return "onnx_int8" if "onnx_int8" in set(df.engine) else df.engine.iloc[-1]
+
+
+def capacity_from_loadtest(load_df, sla_ms):
+    ok = load_df[(load_df.p95_ms <= sla_ms) & (load_df.errors == 0)]
+    if ok.empty:
+        return None
+    best = ok.sort_values("rps").iloc[-1]
+    return {"concurrency": int(best.concurrency), "rps": float(best.rps), "p95_ms": float(best.p95_ms)}
+
+
+def _md_table(df, cols):
+    lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+    for _, r in df.iterrows():
+        lines.append("| " + " | ".join(f"{r[c]:.2f}" if isinstance(r[c], float) else str(r[c]) for c in cols) + " |")
+    return "\n".join(lines)
+
+
+def build_report(bench, load, hourly_usd, sla_ms=3000, target_rps=5.0, headroom=0.8):
+    bench = add_cost_columns(bench, hourly_usd)
+    base_name, opt_name = pick_baseline(bench), pick_optimized(bench)
+    lens = sorted(bench.prompt_tokens.unique())
+    plen = lens[len(lens) // 2]
+    b = bench[(bench.engine == base_name) & (bench.prompt_tokens == plen)].iloc[0]
+    o = bench[(bench.engine == opt_name) & (bench.prompt_tokens == plen)].iloc[0]
+
+    ttft_gain = (1 - o.ttft_p50_ms / b.ttft_p50_ms) * 100
+    speedup = o.decode_tps / b.decode_tps
+    cost_gain = (1 - o.cost_per_1m_output_tokens_usd / b.cost_per_1m_output_tokens_usd) * 100
+    ppl_delta = (o.perplexity / b.perplexity - 1) * 100
+    mem_gain = (1 - o.rss_mb / b.rss_mb) * 100 if b.rss_mb > 0 else float("nan")
+
+    out = [f"# LLM Inference Cost Report", "",
+           f"Assumed instance price: **${hourly_usd:.3f}/hour** (edit with `--hourly-usd`). "
+           f"Headline comparison at **{int(plen)} prompt tokens**, {int(b.new_tokens)} generated tokens.", "",
+           "## Headline", "",
+           f"- **{opt_name}** vs **{base_name}**: time-to-first-token **{abs(ttft_gain):.0f}% "
+           f"{'faster' if ttft_gain >= 0 else 'slower'}**, "
+           f"decode throughput **{speedup:.2f}x** ({b.decode_tps:.1f} -> {o.decode_tps:.1f} tokens/s).",
+           f"- Cost per 1M output tokens: **${b.cost_per_1m_output_tokens_usd:.2f} -> ${o.cost_per_1m_output_tokens_usd:.2f}** "
+           f"({-cost_gain:+.0f}%).",
+           f"- Quality check: perplexity {b.perplexity:.2f} -> {o.perplexity:.2f} ({ppl_delta:+.1f}%), "
+           f"greedy-output agreement with baseline {o.greedy_match * 100:.0f}%.",
+           f"- Resident memory: {b.rss_mb:.0f} MB -> {o.rss_mb:.0f} MB ({-mem_gain:+.0f}%).", "",
+           "## All engines", "",
+           _md_table(bench.round(3), ["engine", "prompt_tokens", "ttft_p50_ms", "ttft_p95_ms", "tpot_p50_ms",
+                                      "decode_tps", "cost_per_1m_output_tokens_usd", "perplexity", "greedy_match"]), ""]
+
+    if load is not None and not load.empty:
+        eng = opt_name if opt_name in set(load.engine) else load.engine.iloc[0]
+        cap = capacity_from_loadtest(load[load.engine == eng], sla_ms)
+        out += ["## Capacity (measured with a real HTTP load test)", "",
+                _md_table(load.round(2), ["engine", "concurrency", "requests", "rps", "p50_ms", "p95_ms",
+                                          "mean_queue_ms", "errors"]), ""]
+        if cap is None:
+            out.append(f"- The p95 latency SLA of {sla_ms:.0f} ms is **not met** by `{eng}` on this hardware, "
+                       f"even at concurrency 1. Use a smaller model, fewer output tokens, or faster hardware.")
+        else:
+            n = instances_needed(target_rps, cap["rps"], headroom)
+            monthly = monthly_self_host_cost(n, hourly_usd)
+            out += [f"- Max throughput within a {sla_ms:.0f} ms p95 SLA: **{cap['rps']:.2f} req/s per instance** "
+                    f"(concurrency {cap['concurrency']}, p95 {cap['p95_ms']:.0f} ms).",
+                    f"- To serve **{target_rps:g} req/s** at {headroom:.0%} max load: **{n} instance(s)**, "
+                    f"about **${monthly:,.0f}/month**."]
+        out.append("")
+
+    out += ["## Recommendation", "",
+            f"Deploy `{opt_name}` if the quality numbers above are acceptable for your task: it lowers cost per token "
+            f"by {cost_gain:.0f}% on this hardware. Re-run the benchmark on your production instance type before "
+            f"committing, since absolute numbers are hardware dependent.", "",
+            "## Limits of this study", "",
+            "- Single small model, shared CPU, one instance type; use ratios rather than absolute numbers.",
+            "- One inference worker per instance and no continuous batching; a production server (vLLM, TGI, "
+            "Triton) would raise throughput.",
+            "- Perplexity on a small built-in text set is a relative signal, not a full quality evaluation.",
+            "- Instance price is an assumption."]
+    return "\n".join(out)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--hourly-usd", type=float, default=DEFAULT_HOURLY_USD)
+    ap.add_argument("--sla-ms", type=float, default=3000)
+    ap.add_argument("--target-rps", type=float, default=5.0)
+    args = ap.parse_args()
+    bench = pd.read_csv(BENCH_CSV)
+    load = pd.read_csv(LOAD_CSV) if LOAD_CSV.exists() else None
+    REPORT_MD.write_text(build_report(bench, load, args.hourly_usd, args.sla_ms, args.target_rps), encoding="utf-8")
+    print(f"Saved {REPORT_MD}")
+
+
+if __name__ == "__main__":
+    main()
