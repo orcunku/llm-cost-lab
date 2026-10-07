@@ -7,6 +7,7 @@ MODEL_ID = os.environ.get("LAB_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
 MODELS_DIR = ROOT / "models"
 FP32_DIR = MODELS_DIR / "fp32"
 INT8_DIR = MODELS_DIR / "int8"
+INT8_PC_DIR = MODELS_DIR / "int8_pc"   # per-channel INT8, output layer kept in FP32
 RESULTS_DIR = ROOT / "results"
 BENCH_CSV = RESULTS_DIR / "benchmark.csv"
 LOAD_CSV = RESULTS_DIR / "loadtest.csv"

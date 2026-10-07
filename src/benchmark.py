@@ -83,7 +83,7 @@ def run_worker(args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engines", nargs="+", default=["pytorch", "onnx_fp32", "onnx_int8"])
+    ap.add_argument("--engines", nargs="+", default=["pytorch", "onnx_fp32", "onnx_int8", "onnx_int8_pc"])
     ap.add_argument("--prompt-lens", type=int, nargs="+", default=[64, 256])
     ap.add_argument("--new-tokens", type=int, default=32)
     ap.add_argument("--runs", type=int, default=10)

@@ -5,7 +5,8 @@ import streamlit as st
 
 from src.config import BENCH_CSV, DEFAULT_HOURLY_USD, LOAD_CSV, REPORT_MD
 from src.cost import (break_even_requests_per_day, instances_needed, monthly_api_cost, monthly_self_host_cost)
-from src.report import add_cost_columns, capacity_from_loadtest, pick_optimized
+from src.report import (MAX_PPL_INCREASE_PCT, add_cost_columns, capacity_from_loadtest, pick_baseline,
+                        pick_optimized, rejected_engines)
 
 st.set_page_config(page_title="LLM Inference Cost Lab", layout="wide")
 st.title("LLM Inference Cost Lab")
@@ -24,6 +25,10 @@ with st.sidebar:
 bench = add_cost_columns(pd.read_csv(BENCH_CSV), hourly)
 load = pd.read_csv(LOAD_CSV) if LOAD_CSV.exists() else None
 engines = bench.engine.unique().tolist()
+
+for name, pct in rejected_engines(bench):
+    st.warning(f"Quality gate: **{name}** raises perplexity by {pct:+.0f}% vs {pick_baseline(bench)} "
+               f"(limit {MAX_PPL_INCREASE_PCT:g}%). It is excluded from the recommendation even if it is cheaper.")
 
 t1, t2, t3, t4 = st.tabs(["Engines", "Load test", "Capacity & cost planner", "Report"])
 
