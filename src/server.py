@@ -5,7 +5,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from pydantic import BaseModel, Field
 
 from .config import MODEL_ID
@@ -23,6 +23,12 @@ def create_app(engine):
     @app.get("/health")
     def health():
         return {"status": "ok", "engine": engine.name, "model": MODEL_ID}
+
+    @app.get("/prompt")
+    def prompt(tokens: int = Query(..., ge=1, le=4096)):
+        """The same prompt the benchmark uses for this length, built with the served model's tokenizer."""
+        text = engine.make_prompt(tokens)
+        return {"prompt": text, "prompt_tokens": engine.count_tokens(text)}
 
     @app.post("/generate")
     async def generate(req: GenRequest):

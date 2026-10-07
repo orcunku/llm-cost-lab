@@ -3,6 +3,7 @@ import subprocess
 import sys
 
 import pandas as pd
+import pytest
 
 from src.config import ROOT
 
@@ -39,9 +40,10 @@ def test_decode_speed_is_plausible_with_few_tokens(tmp_path):
     assert 20 < tps < 250                                # dummy decodes one token per 8 ms (~125 tok/s)
 
 
-def _bench(tmp_path, *engines, new_tokens=4):
+def _bench(tmp_path, *engines, new_tokens=4, runs=2, threads=2):
     cmd = [sys.executable, "-m", "src.benchmark", "--engines", *engines, "--prompt-lens", "8",
-           "--new-tokens", str(new_tokens), "--runs", "2", "--results-dir", str(tmp_path)]
+           "--new-tokens", str(new_tokens), "--runs", str(runs), "--threads", str(threads),
+           "--results-dir", str(tmp_path)]
     subprocess.run(cmd, check=True, cwd=ROOT, capture_output=True)
     return pd.read_csv(tmp_path / "benchmark.csv")
 
@@ -53,9 +55,10 @@ def test_rerunning_one_engine_keeps_the_others_and_compares_to_the_baseline(tmp_
     assert df[df.engine == "dummy_fast"].greedy_match.iloc[0] < 1.0   # not compared against itself
 
 
-def test_results_from_other_settings_are_replaced_not_mixed(tmp_path):
+@pytest.mark.parametrize("changed", [{"new_tokens": 6}, {"threads": 1}, {"runs": 3}])
+def test_results_from_other_settings_are_replaced_not_mixed(tmp_path, changed):
     _bench(tmp_path, "dummy", "dummy_fast")
-    df = _bench(tmp_path, "dummy_fast", new_tokens=6)
+    df = _bench(tmp_path, "dummy_fast", **changed)
     assert list(df.engine) == ["dummy_fast"]
 
 

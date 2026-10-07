@@ -11,7 +11,7 @@ import pandas as pd
 import psutil
 import time
 
-from .config import BENCH_CSV, DEFAULT_HOURLY_USD, MODEL_ID, RESULTS_DIR, ROOT
+from .config import BENCH_CSV, DEFAULT_HOURLY_USD, MODEL_ID, NEW_TOKENS, PROMPT_LENS, RESULTS_DIR, ROOT
 from .data import load_eval_texts
 from .engines import build_engine
 from .report import add_cost_columns, baseline_engine
@@ -104,10 +104,11 @@ def previous_rows(csv_path, args):
     if not csv_path.exists():
         return pd.DataFrame()
     old = pd.read_csv(csv_path)
-    same = ("model" in old.columns and "target_prompt_tokens" in old.columns and set(old.model) == {MODEL_ID}
-            and set(old.new_tokens) == {args.new_tokens} and set(old.target_prompt_tokens) == set(args.prompt_lens))
-    if not same:
-        print(f"Existing {csv_path.name} used another model or settings; it will be replaced.")
+    now = {"model": {MODEL_ID}, "new_tokens": {args.new_tokens}, "target_prompt_tokens": set(args.prompt_lens),
+           "threads": {args.threads}, "runs": {args.runs}}   # timings are only comparable under the same settings
+    differs = [c for c, v in now.items() if c not in old.columns or set(old[c]) != v]
+    if differs:
+        print(f"Existing {csv_path.name} was measured with different {', '.join(differs)}; it will be replaced.")
         return pd.DataFrame()
     return old
 
@@ -125,8 +126,8 @@ def greedy_vs_baseline(results_dir, engine, baseline):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--engines", nargs="+", default=["pytorch", "onnx_fp32", "onnx_int8", "onnx_int8_pc"])
-    ap.add_argument("--prompt-lens", type=int, nargs="+", default=[64, 256])
-    ap.add_argument("--new-tokens", type=int, default=32)
+    ap.add_argument("--prompt-lens", type=int, nargs="+", default=PROMPT_LENS)
+    ap.add_argument("--new-tokens", type=int, default=NEW_TOKENS)
     ap.add_argument("--runs", type=int, default=10)
     ap.add_argument("--threads", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--hourly-usd", type=float, default=DEFAULT_HOURLY_USD)

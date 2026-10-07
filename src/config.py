@@ -15,5 +15,10 @@ LOAD_CSV = RESULTS_DIR / "loadtest.csv"
 REPORT_MD = RESULTS_DIR / "REPORT.md"
 EVAL_TEXTS = ROOT / "data" / "eval_texts.txt"
 
+# One workload for benchmark and load test, so capacity numbers describe the requests that were benchmarked.
+PROMPT_LENS = [64, 256]
+NEW_TOKENS = 32
+LOAD_PROMPT_TOKENS = PROMPT_LENS[len(PROMPT_LENS) // 2]   # the prompt length the report headline uses
+
 # Assumption: price of a 2 vCPU cloud VM (matches a default 2-core Codespace). Replace with your real number.
 DEFAULT_HOURLY_USD = 0.085

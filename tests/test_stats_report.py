@@ -116,3 +116,11 @@ def test_report_warns_when_baseline_perplexity_is_missing():
     df = bench_df()
     df.loc[df.engine == "pytorch", "perplexity"] = float("nan")
     assert "perplexity of `pytorch` could not be measured" in build_report(df, None, hourly_usd=0.085)
+
+
+def test_report_flags_load_test_with_other_request_size():
+    load = load_df().assign(prompt_tokens=64, new_tokens=32)
+    same = build_report(bench_df(), load, hourly_usd=0.085, sla_ms=3000, target_rps=5)
+    assert "64 prompt tokens, 32 generated tokens" in same and "different request size" not in same
+    other = build_report(bench_df(), load.assign(new_tokens=16), hourly_usd=0.085, sla_ms=3000, target_rps=5)
+    assert "different request size" in other

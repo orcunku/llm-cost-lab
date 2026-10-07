@@ -5,8 +5,8 @@ import streamlit as st
 
 from src.config import BENCH_CSV, DEFAULT_HOURLY_USD, LOAD_CSV, REPORT_MD
 from src.cost import (break_even_requests_per_day, instances_needed, monthly_api_cost, monthly_self_host_cost)
-from src.report import (MAX_PPL_INCREASE_PCT, add_cost_columns, capacity_from_loadtest, model_of, pick_baseline,
-                        pick_optimized, ppl_change_text, rejected_engines, same_model)
+from src.report import (MAX_PPL_INCREASE_PCT, add_cost_columns, capacity_from_loadtest, load_workload, model_of,
+                        pick_baseline, pick_optimized, ppl_change_text, rejected_engines, same_model)
 
 st.set_page_config(page_title="LLM Inference Cost Lab", layout="wide")
 st.title("LLM Inference Cost Lab")
@@ -89,6 +89,12 @@ with t3:
     cap = capacity_from_loadtest(load[load.engine == eng], sla_ms) if load is not None and eng in set(load.engine) else None
     if cap:
         inst_rps, src = cap["rps"], f"measured load test (p95 {cap['p95_ms']:.0f} ms within SLA)"
+        workload = load_workload(load[load.engine == eng])
+        if workload and workload != (int(in_tok), int(out_tok)):
+            st.warning(f"Capacity was measured with {workload[0]} prompt / {workload[1]} generated tokens per request, "
+                       f"not the {in_tok:.0f} / {out_tok:.0f} entered here, so the instance count is approximate. "
+                       f"Re-run `python -m src.loadtest --prompt-tokens {in_tok:.0f} --max-new-tokens {out_tok:.0f}` "
+                       "for an exact figure.")
     else:
         inst_rps, src = 1000.0 / row.e2e_p50_ms, "single-request service time (no load test for this engine)"
         if row.e2e_p95_ms > sla_ms:

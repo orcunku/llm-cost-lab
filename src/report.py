@@ -70,6 +70,13 @@ def pick_optimized(df, max_pct=MAX_PPL_INCREASE_PCT):
     return per[~per.index.isin(bad)].tps.idxmax()
 
 
+def load_workload(load_df):
+    """(prompt tokens, generated tokens) per load-test request; None for CSVs written before they were recorded."""
+    if load_df is None or load_df.empty or not {"prompt_tokens", "new_tokens"} <= set(load_df.columns):
+        return None
+    return int(load_df.prompt_tokens.iloc[0]), int(load_df.new_tokens.iloc[0])
+
+
 def capacity_from_loadtest(load_df, sla_ms):
     ok = load_df[(load_df.p95_ms <= sla_ms) & (load_df.errors == 0)]
     if ok.empty:
@@ -148,9 +155,16 @@ def build_report(bench, load, hourly_usd, sla_ms=3000, target_rps=5.0, headroom=
     elif load is not None and not load.empty:
         eng = opt_name if opt_name in set(load.engine) else load.engine.iloc[0]
         cap = capacity_from_loadtest(load[load.engine == eng], sla_ms)
+        workload = load_workload(load)
         out += ["## Capacity (measured with a real HTTP load test)", "",
-                f"Load test engine: `{eng}`.", "",
-                _md_table(load.round(2), ["engine", "concurrency", "requests", "rps", "p50_ms", "p95_ms",
+                f"Load test engine: `{eng}`. " + (f"Each request: {workload[0]} prompt tokens, {workload[1]} "
+                                                  f"generated tokens." if workload else ""), ""]
+        if workload and workload != (int(plen), int(b.new_tokens)):
+            out += [f"> Note: the load test used a different request size than the headline ({int(plen)} prompt / "
+                    f"{int(b.new_tokens)} generated tokens), so capacity and cost figures describe different "
+                    f"requests. Re-run `python -m src.loadtest --prompt-tokens {int(plen)} "
+                    f"--max-new-tokens {int(b.new_tokens)}`.", ""]
+        out += [_md_table(load.round(2), ["engine", "concurrency", "requests", "rps", "p50_ms", "p95_ms",
                                           "mean_queue_ms", "errors"]), ""]
         if eng != opt_name:
             out += [f"> Note: the recommended engine is `{opt_name}` but the load test ran on `{eng}`. "
