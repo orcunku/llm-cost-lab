@@ -9,6 +9,7 @@ MODELS_DIR = ROOT / "models" / MODEL_ID.replace("/", "--")
 FP32_DIR = MODELS_DIR / "fp32"
 INT8_DIR = MODELS_DIR / "int8"
 INT8_PC_DIR = MODELS_DIR / "int8_pc"   # per-channel INT8, output layer kept in FP32
+INT8_MIXED_DIR = MODELS_DIR / "int8_mixed"   # per-channel INT8, lm_head, MLP down_proj and embedding kept in FP32
 RESULTS_DIR = ROOT / "results"
 BENCH_CSV = RESULTS_DIR / "benchmark.csv"
 LOAD_CSV = RESULTS_DIR / "loadtest.csv"

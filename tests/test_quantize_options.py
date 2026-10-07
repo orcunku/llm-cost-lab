@@ -61,3 +61,32 @@ def test_per_channel_quantization_keeps_lm_head_in_fp32(tmp_path):
     ops = _ops(onnx.load(str(dst)))
     assert "MatMulInteger" in ops          # the transformer layer was quantized
     assert "MatMul" in ops                 # the excluded lm_head stayed in float
+
+
+def _mlp_model():
+    x = helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 8])
+    y = helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 8])
+    nodes = [helper.make_node("MatMul", ["x", "w1"], ["a"], name="/model/layers.0/mlp/up_proj/MatMul"),
+             helper.make_node("MatMul", ["a", "w2"], ["b"], name="/model/layers.0/mlp/down_proj/MatMul"),
+             helper.make_node("MatMul", ["b", "w3"], ["y"], name="/lm_head/MatMul")]
+    graph = helper.make_graph(nodes, "g", [x], [y], initializer=[_w("w1"), _w("w2"), _w("w3")])
+    m = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+    m.ir_version = 8
+    return m
+
+
+def test_mixed_variant_keeps_down_proj_and_lm_head_in_fp32(tmp_path, monkeypatch):
+    import src.export as export
+    fp32, out = tmp_path / "fp32", tmp_path / "int8_mixed"
+    fp32.mkdir()
+    onnx.save(_mlp_model(), str(fp32 / "model.onnx"))
+    (fp32 / "config.json").write_text("{}")
+    monkeypatch.setattr(export, "FP32_DIR", fp32)
+    monkeypatch.setitem(export.VARIANTS, "int8_mixed", {**export.VARIANTS["int8_mixed"], "directory": out})
+    export.quantize_variant("int8_mixed")
+    nodes = {n.name: n.op_type for n in onnx.load(str(out / "model.onnx")).graph.node}
+    assert nodes["/model/layers.0/mlp/down_proj/MatMul"] == "MatMul"     # left in float
+    assert nodes["/lm_head/MatMul"] == "MatMul"
+    assert "/model/layers.0/mlp/up_proj/MatMul" not in nodes             # replaced by an integer MatMul
+    assert "MatMulInteger" in nodes.values()
+    assert (out / "config.json").exists()                                # loader files copied

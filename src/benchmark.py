@@ -125,7 +125,8 @@ def greedy_vs_baseline(results_dir, engine, baseline):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engines", nargs="+", default=["pytorch", "onnx_fp32", "onnx_int8", "onnx_int8_pc"])
+    ap.add_argument("--engines", nargs="+", default=["pytorch", "onnx_fp32", "onnx_int8", "onnx_int8_pc",
+                                                         "onnx_int8_mixed"])
     ap.add_argument("--prompt-lens", type=int, nargs="+", default=PROMPT_LENS)
     ap.add_argument("--new-tokens", type=int, default=NEW_TOKENS)
     ap.add_argument("--runs", type=int, default=10)
