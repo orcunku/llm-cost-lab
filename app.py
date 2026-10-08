@@ -18,8 +18,9 @@ if not BENCH_CSV.exists():
 
 with st.sidebar:
     st.header("Assumptions")
-    hourly = st.number_input("Instance price (USD/hour)", value=float(DEFAULT_HOURLY_USD), step=0.005, format="%.3f")
-    sla_ms = st.number_input("p95 latency SLA (ms)", value=float(DEFAULT_SLA_MS), step=100.0)
+    hourly = st.number_input("Instance price (USD/hour)", value=float(DEFAULT_HOURLY_USD), min_value=0.001, step=0.005,
+                             format="%.3f")
+    sla_ms = st.number_input("p95 latency SLA (ms)", value=float(DEFAULT_SLA_MS), min_value=100.0, step=100.0)
     headroom = st.slider("Max load per instance", 0.3, 0.95, 0.8)
 
 bench = add_cost_columns(pd.read_csv(BENCH_CSV), hourly)
@@ -55,7 +56,7 @@ with t1:
 
 with t2:
     if load is None:
-        st.info("No load test yet. Run `python -m src.loadtest --engine onnx_int8`.")
+        st.info("No load test yet. Run `python -m src.loadtest --engine <engine>`.")
     else:
         st.caption("Latency rises with concurrency because requests queue for the single inference worker.")
         idx = load.set_index("concurrency")
@@ -74,17 +75,20 @@ with t3:
         default_engine = pick_optimized(bench)
         eng = st.selectbox("Engine to deploy", engines, index=engines.index(default_engine))
         row_view = bench[bench.engine == eng]
-        plen3 = st.selectbox("Typical prompt length", sorted(row_view.prompt_tokens.unique().tolist()), key="p3")
+        lens3 = sorted(row_view.prompt_tokens.unique().tolist())
+        measured = load_workload(load[load.engine == eng]) if load is not None else None
+        start = lens3.index(measured[0]) if measured and measured[0] in lens3 else len(lens3) // 2
+        plen3 = st.selectbox("Typical prompt length", lens3, index=start, key="p3")   # default: load-tested size
         row = row_view[row_view.prompt_tokens == plen3].iloc[0]
-        rpd = st.number_input("Requests per day", value=500_000, step=50_000)
+        rpd = st.number_input("Requests per day", value=500_000, min_value=1_000, step=50_000)
         peak = st.slider("Peak / average traffic", 1.0, 10.0, 3.0)
     with right:
-        in_tok = st.number_input("Avg input tokens", value=float(row.prompt_tokens))
-        out_tok = st.number_input("Avg output tokens", value=float(row.new_tokens))
+        in_tok = st.number_input("Avg input tokens", value=float(row.prompt_tokens), min_value=1.0)
+        out_tok = st.number_input("Avg output tokens", value=float(row.new_tokens), min_value=1.0)
         in_price = st.number_input("Hosted API input price (USD per 1M tokens) - enter CURRENT price",
-                                   value=0.15, step=0.01)
+                                   value=0.15, min_value=0.0, step=0.01)
         out_price = st.number_input("Hosted API output price (USD per 1M tokens) - enter CURRENT price",
-                                    value=0.60, step=0.01)
+                                    value=0.60, min_value=0.0, step=0.01)
 
     cap = capacity_from_loadtest(load[load.engine == eng], sla_ms) if load is not None and eng in set(load.engine) else None
     if cap:
@@ -105,13 +109,15 @@ with t3:
     n = instances_needed(peak_rps, inst_rps, headroom)
     self_cost = monthly_self_host_cost(n, hourly)
     api_cost = monthly_api_cost(rpd, in_tok, out_tok, in_price, out_price)
-    be = break_even_requests_per_day(monthly_self_host_cost(1, hourly), in_tok, out_tok, in_price, out_price)
+    free_api = in_tok * in_price + out_tok * out_price <= 0      # a free API never breaks even
+    be = None if free_api else break_even_requests_per_day(monthly_self_host_cost(1, hourly), in_tok, out_tok,
+                                                           in_price, out_price)
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Instances needed", n)
     m2.metric("Self-host / month", f"${self_cost:,.0f}")
     m3.metric("Hosted API / month", f"${api_cost:,.0f}")
-    m4.metric("1-instance break-even", f"{be:,.0f} req/day")
+    m4.metric("1-instance break-even", "n/a" if be is None else f"{be:,.0f} req/day")
     if self_cost < api_cost:
         st.success("Self-hosting is cheaper at this traffic.")
     else:

@@ -1,0 +1,4 @@
+# Dashboard only (Streamlit Community Cloud). Versions match the ones tested locally.
+streamlit==1.65.0
+pandas==3.0.6
+numpy==2.4.6

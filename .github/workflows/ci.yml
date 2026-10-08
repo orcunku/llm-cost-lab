@@ -9,6 +9,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test dependencies
-        run: pip install numpy pandas fastapi uvicorn httpx psutil pytest onnx onnxruntime
+        run: pip install -r dashboard/requirements.txt fastapi uvicorn httpx psutil pytest onnx onnxruntime
       - name: Run tests
         run: python -m pytest -q
