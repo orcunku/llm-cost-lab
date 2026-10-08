@@ -1,5 +1,8 @@
 # LLM Inference Cost Lab
 
+**Live demo:** [llm-cost-lab.streamlit.app](https://llm-cost-lab.streamlit.app): explore the measured results,
+load-test curves and the capacity & cost planner in the browser, with no install.
+
 **Question answered:** *How much cheaper is it to serve a small LLM with ONNX Runtime (FP32 / INT8) than with PyTorch,
 what does quantization cost in quality, and how many instances (and dollars per month) do I need for a target
 traffic level and latency SLA?*
