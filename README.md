@@ -99,7 +99,7 @@ Problems found in an audit of the pipeline, each fixed with a regression test:
   and capacity described different workloads. Both now share one workload and the benchmark's exact prompt;
   capacity per instance went from 0.83 to 0.38 req/s once requests matched.
 
-## Limitations (keep these in your write-up)
+## Limitations 
 - Small model, shared CPU, one instance type: trust ratios more than absolute numbers.
 - One worker per instance and no continuous batching; production stacks (vLLM, TGI, Triton) would do better.
 - Perplexity on a small text set is a relative quality signal, not a full evaluation.
