@@ -75,7 +75,7 @@ layer and the embedding table. It decodes 1.61x faster and costs 38% less per ou
   speed-up. These layers receive large activation outliers, which dynamic INT8 squeezes into one scale per tensor.
 - **Perplexity is not the whole story.** `int8_mixed` passes the perplexity gate but produces the same greedy
   tokens as PyTorch only 38% of the time, because one early different token changes everything after it.
-  Check task-level quality before shipping; the gate here is a minimum bar.
+  the gate here is a minimum bar.
 - **The faster engine depends on prompt length.** ONNX FP32 reaches the first token 18% sooner than PyTorch at
   64 prompt tokens but 21% later at 256; decoding is 16-24% faster at both. For long prompts (RAG) check TTFT,
   not just tokens/s.
